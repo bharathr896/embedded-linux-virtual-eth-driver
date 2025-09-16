@@ -13,21 +13,53 @@ static int	virteth_stop(struct net_device *dev);
 static netdev_tx_t	virteth_xmit(struct sk_buff *skb,struct net_device *dev);
 
 static int virteth_open(struct net_device *dev){
-    dev_info(&dev->dev,"Device Opened \n");
+    
     netif_start_queue(dev);
+    netif_carrier_on(dev);
+    dev_info(&dev->dev,"Device Opened \n");
     return 0;
 }
 
 static int	virteth_stop(struct net_device *dev){
+    netif_carrier_off(dev);
     netif_stop_queue(dev);
     dev_info(&dev->dev,"Device Stoped \n");
     return 0;
 }
 
 static netdev_tx_t virteth_xmit(struct sk_buff *skb,struct net_device *dev){
+
+    struct sk_buff *rx_skb;
+
     dev_info(&dev->dev,"xmit len=%u protocol=0x%04x\n",skb->len,ntohs(skb->protocol));
+    
+    /* Update TX Statistics */
     dev->stats.tx_packets++;
     dev->stats.tx_bytes += skb->len;
+
+    /* Clone the skb for loopback */
+    rx_skb = skb_clone(skb,GFP_ATOMIC);
+
+    if(rx_skb){
+        rx_skb->dev = dev;
+
+        rx_skb->protocol = eth_type_trans(skb,dev);
+
+        /* Update RX Stats */
+        dev->stats.rx_packets++;
+        dev->stats.rx_bytes += rx_skb->len;
+
+        /* Inject cloned skb into kernel RX path 
+        Using netif_rx schedules softirq to process receive */
+        netif_rx(rx_skb);
+
+    }
+    else{
+        dev_warn(&dev->dev,"skb_clone failed, dropping loopback RX\n");
+        dev->stats.rx_dropped++;
+    }
+
+
 
     dev_kfree_skb(skb);
 
