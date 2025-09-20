@@ -4,6 +4,7 @@ This project delivers a **production-style virtual Ethernet driver** for the Lin
 The driver registers a network interface (`virteth0`) and simulates NIC behavior with **TX/RX rings, NAPI support, and ethtool integration**.  
 
 Packets transmitted are looped back into the receive path, enabling complete testing with tools like `ping`, `tcpdump`, and `iperf3` — all without requiring physical hardware.  
+
 ---
 
 ## Features
