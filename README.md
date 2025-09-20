@@ -1,22 +1,20 @@
 # Embedded Linux Virtual Ethernet Driver
 
-This project implements a **virtual Ethernet driver** for Linux, built from scratch to explore how the kernel networking stack (`net_device`, SKBs, NAPI, rings, and ethtool) interacts with drivers.  
+This project delivers a **production-style virtual Ethernet driver** for the Linux kernel.  
+The driver registers a network interface (`virteth0`) and simulates NIC behavior with **TX/RX rings, NAPI support, and ethtool integration**.  
 
-Creates a virtual NIC (`virteth0`). Outgoing packets are looped back into the receive path so you can test networking concepts with tools like `ping`, `tcpdump`, and `iperf` — without needing a physical NIC.  
-
+Packets transmitted are looped back into the receive path, enabling complete testing with tools like `ping`, `tcpdump`, and `iperf3` — all without requiring physical hardware.  
 ---
+
+## Features
 
 - **Network device integration**
   - Registers `virteth0` as a Linux network device.
   - Implements open/stop, transmit (`ndo_start_xmit`), and RX handling.
 
 - **Loopback functionality**
-  - Transmitted SKBs are cloned and injected back into the RX path.
-  - Uses `eth_type_trans()` to set `skb->protocol` and hand packets correctly to the stack.
-  - Ping to self works:  
-    ```bash
-    ping -I virteth0 192.168.100.1
-    ```
+  - Outgoing packets are cloned and injected into the RX path
+  - Works seamlessly with `ping`, `iperf3`, and higher-layer protocols
 
 - **TX/RX ring simulation**
   - Software ring buffers mimic hardware descriptor queues.
@@ -24,15 +22,13 @@ Creates a virtual NIC (`virteth0`). Outgoing packets are looped back into the re
   - TX queue flow control with `netif_stop_queue()` and `netif_wake_queue()`.
 
 - **NAPI support**
-  - RX path uses NAPI polling instead of pure interrupt simulation.
-  - `napi_gro_receive()` batches packets (like real drivers).
-  - Reduces packet loss under load.
+  - RX path leverages NAPI polling with `napi_gro_receive()`
+  - Efficient under load, mimicking real NIC drivers
 
-- **Ethtool integration**
-  - `ethtool -i virteth0` → driver name, version, bus info  
-  - `ethtool virteth0` → link settings (speed, duplex, autoneg)  
-  - `ethtool -s virteth0 speed 1000 duplex full autoneg on` → change link state  
-  - Default link = **100 Mbps, full duplex**  
+- **Ethtool support**
+  - `ethtool` commands expose driver and link details
+  - Configurable **speed, duplex, autonegotiation**
+  - Query driver name, version, and bus info  
 
 ---
 
