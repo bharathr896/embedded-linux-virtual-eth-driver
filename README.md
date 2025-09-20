@@ -1,6 +1,6 @@
 # Embedded Linux Virtual Ethernet Driver
 
-This project implements a **virtual Ethernet driver** for Linux, built from scratch to explore how the kernel networking stack (`net_device`, SKBs, NAPI, and rings) interacts with drivers.  
+This project implements a **virtual Ethernet driver** for Linux, built from scratch to explore how the kernel networking stack (`net_device`, SKBs, NAPI, rings, and ethtool) interacts with drivers.  
 
 Creates a virtual NIC (`virteth0`). Outgoing packets are looped back into the receive path so you can test networking concepts with tools like `ping`, `tcpdump`, and `iperf` — without needing a physical NIC.  
 
@@ -27,6 +27,12 @@ Creates a virtual NIC (`virteth0`). Outgoing packets are looped back into the re
   - RX path uses NAPI polling instead of pure interrupt simulation.
   - `napi_gro_receive()` batches packets (like real drivers).
   - Reduces packet loss under load.
+
+- **Ethtool integration**
+  - `ethtool -i virteth0` → driver name, version, bus info  
+  - `ethtool virteth0` → link settings (speed, duplex, autoneg)  
+  - `ethtool -s virteth0 speed 1000 duplex full autoneg on` → change link state  
+  - Default link = **100 Mbps, full duplex**  
 
 ---
 
@@ -56,7 +62,96 @@ sudo insmod virt_eth.ko
 # Create interface
 sudo ip addr add 192.168.100.1/24 dev virteth0
 sudo ip link set virteth0 up
+```
 
-# Test loopback
+## Testing
+
+### 1. Ping (loopback path)
+```bash
 ping -I virteth0 192.168.100.1
 ```
+### 2. Ethtool
+```bash
+ethtool -i virteth0
+ethtool virteth0
+sudo ethtool -s virteth0 speed 1000 duplex full autoneg on
+ethtool virteth0
+```
+
+### 3.iperf3
+```bash
+iperf3 -s -B 192.168.100.1      # terminal 1
+iperf3 -c 192.168.100.1 -t 10   # terminal 2
+```
+
+## Example Results 
+
+### Ping
+
+```bash
+$ ping -I virteth0 192.168.100.1 -c 3
+PING 192.168.100.1 (192.168.100.1) from 192.168.100.1 virteth0: 56(84) bytes of data.
+64 bytes from 192.168.100.1: icmp_seq=1 ttl=64 time=0.022 ms
+64 bytes from 192.168.100.1: icmp_seq=2 ttl=64 time=0.014 ms
+64 bytes from 192.168.100.1: icmp_seq=3 ttl=64 time=0.015 ms
+
+--- 192.168.100.1 ping statistics ---
+3 packets transmitted, 3 received, 0% packet loss, time 2041ms
+rtt min/avg/max/mdev = 0.014/0.017/0.022/0.003 ms
+
+```
+### Ethtool
+
+```bash
+$ ethtool virteth0
+
+Settings for virteth0:
+        Supported ports: [  ]
+        Supported link modes:   Not reported
+        Supported pause frame use: No
+        Supports auto-negotiation: No
+        Supported FEC modes: Not reported
+        Advertised link modes:  Not reported
+        Advertised pause frame use: No
+        Advertised auto-negotiation: No
+        Advertised FEC modes: Not reported
+        Speed: 1000Mb/s
+        Duplex: Full
+        Auto-negotiation: on
+        Port: Twisted Pair
+        PHYAD: 0
+        Transceiver: internal
+        MDI-X: Unknown
+netlink error: Operation not permitted
+
+```
+
+### iperf3
+
+```bash
+$ iperf3 -c 192.168.100.1 -t 10
+
+Connecting to host 192.168.100.1, port 5201
+[  5] local 192.168.100.1 port 58564 connected to 192.168.100.1 port 5201
+[ ID] Interval           Transfer     Bitrate         Retr  Cwnd
+[  5]   0.00-1.00   sec  8.29 GBytes  71.2 Gbits/sec    0   2.37 MBytes
+[  5]   1.00-2.00   sec  8.47 GBytes  72.8 Gbits/sec    0   2.37 MBytes
+[  5]   2.00-3.00   sec  8.53 GBytes  73.3 Gbits/sec    0   2.37 MBytes
+[  5]   3.00-4.00   sec  8.50 GBytes  73.0 Gbits/sec    0   2.37 MBytes
+[  5]   4.00-5.00   sec  8.47 GBytes  72.7 Gbits/sec    0   2.37 MBytes
+[  5]   5.00-6.00   sec  8.44 GBytes  72.5 Gbits/sec    0   2.37 MBytes
+[  5]   6.00-7.00   sec  8.45 GBytes  72.6 Gbits/sec    0   2.37 MBytes
+[  5]   7.00-8.00   sec  8.43 GBytes  72.4 Gbits/sec    0   2.37 MBytes
+[  5]   8.00-9.00   sec  8.65 GBytes  74.3 Gbits/sec    0   2.37 MBytes
+[  5]   9.00-10.00  sec  8.24 GBytes  70.8 Gbits/sec    0   2.37 MBytes
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[ ID] Interval           Transfer     Bitrate         Retr
+[  5]   0.00-10.00  sec  84.5 GBytes  72.5 Gbits/sec    0             sender
+[  5]   0.00-10.00  sec  84.5 GBytes  72.5 Gbits/sec                  receiver
+
+iperf Done.
+```
+
+
+
+
