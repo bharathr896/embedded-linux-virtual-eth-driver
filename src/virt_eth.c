@@ -6,7 +6,8 @@
 #include <linux/skbuff.h>
 #include <linux/if_ether.h>
 #include <linux/if_packet.h>
-
+#include <linux/ethtool.h>
+#include <linux/mutex.h>
 
 #define DRV_NAME "virt_eth"
 #define DRV_VERSION "0.3"
@@ -28,6 +29,14 @@ struct virteth_priv {
     unsigned int tx_head;
     unsigned int tx_tail;
     unsigned int tx_count;
+
+    /* Link settings */
+    struct mutex link_lock;
+    u32 link_speed;   /* Mbps */
+    u8 duplex;        /* 0 = half, 1 = full */
+    u8 autoneg;       /* 0 = off, 1 = on */
+
+    struct net_device *dev;
 };
 
 static struct net_device *virteth_dev;
@@ -46,7 +55,6 @@ static bool ring_is_empty(unsigned int count){
 
 static int virteth_poll(struct napi_struct *napi, int budget){
     struct virteth_priv *priv = container_of(napi,struct virteth_priv,napi);
-
     int work_done = 0;
 
     while(work_done < budget && !ring_is_empty(priv->rx_count)) {
@@ -84,6 +92,7 @@ static int virteth_poll(struct napi_struct *napi, int budget){
 static int virteth_open(struct net_device *dev){
 
     struct virteth_priv *priv = netdev_priv(dev);
+
     priv->rx_head = priv->rx_tail = priv->rx_count = 0;
     priv->tx_head = priv->tx_tail = priv->tx_count = 0;
     napi_enable(&priv->napi);
@@ -181,6 +190,59 @@ static struct net_device_ops virteth_netdev_ops = {
     .ndo_start_xmit = virteth_xmit,
 };
 
+/* ---- Ethtool ---- */
+static void virteth_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
+{
+    strscpy(info->driver, DRV_NAME, sizeof(info->driver));
+    strscpy(info->version, DRV_VERSION, sizeof(info->version));
+    strscpy(info->fw_version, "N/A", sizeof(info->fw_version));
+    strscpy(info->bus_info, dev_name(&dev->dev), sizeof(info->bus_info));
+}
+
+static u32 virteth_get_link(struct net_device *dev)
+{
+    return netif_carrier_ok(dev) ? 1 : 0;
+}
+
+static int virteth_get_link_ksettings(struct net_device *dev,
+                                      struct ethtool_link_ksettings *cmd)
+{
+    struct virteth_priv *priv = netdev_priv(dev);
+
+    mutex_lock(&priv->link_lock);
+    cmd->base.speed = priv->link_speed;
+    cmd->base.duplex = priv->duplex ? DUPLEX_FULL : DUPLEX_HALF;
+    cmd->base.autoneg = priv->autoneg ? AUTONEG_ENABLE : AUTONEG_DISABLE;
+    mutex_unlock(&priv->link_lock);
+
+    return 0;
+}
+
+static int virteth_set_link_ksettings(struct net_device *dev,
+                                      const struct ethtool_link_ksettings *cmd)
+{
+    struct virteth_priv *priv = netdev_priv(dev);
+
+    mutex_lock(&priv->link_lock);
+    priv->link_speed = cmd->base.speed;
+    priv->duplex = (cmd->base.duplex == DUPLEX_FULL);
+    priv->autoneg = (cmd->base.autoneg == AUTONEG_ENABLE);
+    mutex_unlock(&priv->link_lock);
+
+    if (priv->link_speed == 0)
+        netif_carrier_off(dev);
+    else
+        netif_carrier_on(dev);
+
+    return 0;
+}
+
+static const struct ethtool_ops virteth_ethtool_ops = {
+    .get_drvinfo        = virteth_get_drvinfo,
+    .get_link           = virteth_get_link,
+    .get_link_ksettings = virteth_get_link_ksettings,
+    .set_link_ksettings = virteth_set_link_ksettings,
+};
 
 
 
@@ -213,9 +275,16 @@ static int __init virteth_init(void){
 
     /* Set TX Queue len to 1000 */
     virteth_dev->tx_queue_len = 1000;
+    virteth_dev->ethtool_ops = &virteth_ethtool_ops;
 
     priv = netdev_priv(virteth_dev);
     memset(priv,0,sizeof(*priv));
+
+    priv->dev = virteth_dev;
+    mutex_init(&priv->link_lock);
+    priv->link_speed = 100; /* Default 100 Mbps full duplex */
+    priv->duplex = 1;
+    priv->autoneg = 0;
 
     /* Add NAPI poll mechanism */
     netif_napi_add(virteth_dev,&priv->napi,virteth_poll);
